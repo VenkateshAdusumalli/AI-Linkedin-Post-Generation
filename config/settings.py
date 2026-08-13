@@ -33,6 +33,8 @@ def is_placeholder(value: str | None) -> bool:
 YOUTUBE_API_KEY = get_setting("YOUTUBE_API_KEY")
 GEMINI_API_KEY = get_setting("GEMINI_API_KEY")
 YOUTUBE_CHANNEL_ID = get_setting("YOUTUBE_CHANNEL_ID", "UClXAalunTPaX1YV185DWUeg")
+CLOUDFLARE_ACCOUNT_ID = get_setting("CLOUDFLARE_ACCOUNT_ID")
+CLOUDFLARE_API_TOKEN = get_setting("CLOUDFLARE_API_TOKEN")
 
 
 def validate_config() -> dict:
@@ -41,6 +43,8 @@ def validate_config() -> dict:
         "YOUTUBE_API_KEY": get_setting("YOUTUBE_API_KEY"),
         "GEMINI_API_KEY": get_setting("GEMINI_API_KEY"),
         "YOUTUBE_CHANNEL_ID": get_setting("YOUTUBE_CHANNEL_ID", "UClXAalunTPaX1YV185DWUeg"),
+        "CLOUDFLARE_ACCOUNT_ID": get_setting("CLOUDFLARE_ACCOUNT_ID"),
+        "CLOUDFLARE_API_TOKEN": get_setting("CLOUDFLARE_API_TOKEN"),
     }
 
     missing = [name for name, value in config.items() if not value]

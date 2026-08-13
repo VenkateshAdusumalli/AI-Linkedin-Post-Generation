@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# AI-Linkedin-Post-Generation
-=======
 # AI LinkedIn Content Agent
 
 A beginner-friendly pipeline that:
@@ -9,7 +6,10 @@ A beginner-friendly pipeline that:
 2. Finds the latest video
 3. Extracts the transcript in memory
 4. Sends the transcript to Gemini
-5. Prints a LinkedIn post for review
+5. Generates a LinkedIn post
+6. Generates an image prompt from the LinkedIn post
+7. Sends the prompt to Cloudflare Workers AI
+8. Saves a temporary image for review
 
 ## Project structure
 
@@ -17,6 +17,7 @@ A beginner-friendly pipeline that:
 ai-linkedin-agent/
 ├── agents/
 │   ├── __init__.py
+│   ├── image_agent.py
 │   └── linkedin_agent.py
 ├── config/
 │   ├── __init__.py
@@ -29,8 +30,7 @@ ai-linkedin-agent/
 ├── .gitignore
 ├── main.py
 ├── README.md
-├── requirements.txt
-└── sample check.py
+└── requirements.txt
 ```
 
 ## Setup
@@ -49,6 +49,8 @@ Edit `.env` and add your real keys:
 YOUTUBE_API_KEY=your_youtube_key
 GEMINI_API_KEY=your_gemini_key
 YOUTUBE_CHANNEL_ID=UClXAalunTPaX1YV185DWUeg
+CLOUDFLARE_ACCOUNT_ID=your_account_id
+CLOUDFLARE_API_TOKEN=your_api_token
 ```
 
 ## Run
@@ -59,7 +61,7 @@ python main.py
 
 ## Notes
 
-- The transcript stays in memory; it is not saved to a file.
-- This project intentionally keeps the architecture simple.
-- No publishing, scheduling, image generation, or deployment features are included yet.
->>>>>>> b1e621c (Initial project setup)
+- The transcript stays in memory and is passed directly to Gemini.
+- The LinkedIn post is used to generate a relevant image prompt.
+- Cloudflare Workers AI returns a Base64 image that is saved temporarily.
+- No LinkedIn publishing or permanent image archiving is implemented yet.
