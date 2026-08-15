@@ -15,7 +15,7 @@ CLOUDFLARE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
 
 def _call_gemini_analyze(api_key: str, linkedin_post: str) -> str:
     client = genai.Client(api_key=api_key)
-    # Instruct Gemini to output a strict JSON object with the analysis fields we need.
+    # Instruct Gemini to output a strict JSON object with enhanced infographic design analysis.
     prompt = f"""
 Analyze the following LinkedIn post and return a JSON object ONLY (no extra text) with these keys:
 
@@ -24,15 +24,25 @@ Analyze the following LinkedIn post and return a JSON object ONLY (no extra text
 - main_technology: short phrase for the technology/research/product
 - main_action: short phrase describing the primary action/process
 - important_objects: array of short phrases for visible physical objects
-- environment: short phrase for the scene/context (e.g., lab, clinic, operating room, cleanroom)
+- environment: short phrase for the scene/context (e.g., lab, clinic, operating room, cleanroom, office)
 - visual_concept: one concise paragraph describing how to visualize the REAL SUBJECT (no metaphors, no fictional characters)
+- image_heading: SHORT, POWERFUL HEADING (2-4 words max per line, capitalize key words). Should summarize the main idea. Format as: "WORD1.\\nWORD2.\\nWORD3." Example: "MONETIZE AI.\\nSOLVE PROBLEMS.\\nCREATE VALUE."
+- visual_flow: array of 3-5 steps showing the main workflow/process/progression (e.g., ["Problem", "Solution", "Implementation", "Result"])
+- key_concepts: array of 2-4 key ideas or metrics to highlight in the image
+- infographic_elements: array of suggested visual elements (e.g., ["flow arrows", "numbered steps", "process diagram", "icons", "charts"] - only what's truly relevant)
+- layout_suggestion: recommended layout style (e.g., "horizontal flow", "vertical progression", "central concept with supporting points", "pyramid", "cycle")
+- color_palette: suggested professional colors or tone (e.g., "navy and white with blue accents", "dark theme with gold highlights", "clean minimalist")
 - contains: an object with boolean flags for movie_references, fictional_characters, metaphors, sensational_headlines, comparisons, jokes
-- recommended_style: suggested style keywords for a professional LinkedIn/technical image
+- recommended_style: suggested style keywords for a professional LinkedIn/technical image (e.g., "editorial infographic, modern, premium")
 
 Rules:
 - ALWAYS prioritize the real_subject and visual_concept; do not describe or suggest fictional characters or copyrighted characters.
+- The image_heading must be SHORT and POWERFUL - max 3 lines, each line ideally 1-2 words. Make it visually impactful.
+- visual_flow should show the progression or workflow inherent in the post.
+- Only suggest infographic_elements that truly help explain the topic - don't force all elements into every image.
 - Do NOT include any image generation model-specific syntax; just plain values.
 - Keep arrays of strings for lists.
+- Return ONLY the JSON object, no markdown formatting, no extra text.
 
 LinkedIn post:\n""" + linkedin_post
 
@@ -45,7 +55,17 @@ LinkedIn post:\n""" + linkedin_post
     if not output:
         raise RuntimeError("Gemini returned no content during analysis.")
 
-    return output.strip()
+    # Strip markdown code fence if present
+    output = output.strip()
+    if output.startswith("```json"):
+        output = output[7:]  # Remove ```json
+    if output.startswith("```"):
+        output = output[3:]  # Remove ```
+    if output.endswith("```"):
+        output = output[:-3]  # Remove trailing ```
+    output = output.strip()
+    
+    return output
 
 
 def _extract_image_data(response_json: dict) -> tuple[str, str]:
@@ -178,57 +198,109 @@ def identify_real_subject(analysis: Dict[str, Any], linkedin_post: str) -> str:
 
 
 def build_image_prompt(linkedin_post: str, analysis: Dict[str, Any] | None = None) -> str:
-    """Build a Cloudflare-ready image prompt from Gemini analysis or fallback to conservative prompt.
-
-    The prompt enforces professional, non-fictional visual rules and prioritizes the real-world subject.
+    """Build a premium professional infographic-style image prompt for Cloudflare.
+    
+    Creates a focused prompt that emphasizes:
+    - Strong main heading
+    - Professional infographic layout
+    - Clear visual hierarchy
+    - Relevant infographic elements
+    - Process/workflow visualization
+    - Premium LinkedIn-suitable design
     """
     rules = (
         "Do not depict fictional characters, movie characters, copyrighted characters, or cartoons. "
-        "No logos, watermarks, or large text. Keep composition professional and suitable for LinkedIn."
+        "No logos, watermarks, or large distracting text. Ensure text/headings are clearly readable and professional."
     )
 
     if not analysis:
         return (
-            "Create a professional, realistic LinkedIn-style technology/science visualization. "
-            "Show the real-world subject described in the LinkedIn post below; avoid any pop-culture characters or metaphors. "
-            "Use clean composition, high detail, and realistic materials. "
-            "Keep lighting professional and background minimal (lab or clinical environment). "
+            "Create a premium professional LinkedIn infographic. "
+            "Show the main idea clearly with strong visual hierarchy, relevant illustrations, and clean typography. "
+            "Use a structured layout: main heading at top, central visual concept, supporting elements below. "
+            "Show the real-world subject described in the post; avoid any pop-culture characters or metaphors. "
+            "Use professional colors, balanced composition, and sophisticated design. "
             f"{rules}\n\nLinkedIn post:\n{linkedin_post}"
         )
 
+    # Extract all enhanced analysis fields
     subject = identify_real_subject(analysis, linkedin_post)
-    action = analysis.get("main_action") or "show the device in use"
-    environment = analysis.get("environment") or "laboratory or clinical setting"
-    objects: List[str] = analysis.get("important_objects") or []
+    action = analysis.get("main_action", "demonstrate the concept")
+    environment = analysis.get("environment", "professional setting")
+    objects: List[str] = analysis.get("important_objects", [])
     visual_concept = analysis.get("visual_concept")
-    style = analysis.get("recommended_style") or "realistic, high-detail scientific visualization"
+    
+    # NEW: Extract enhanced infographic elements
+    heading = analysis.get("image_heading", "")
+    visual_flow: List[str] = analysis.get("visual_flow", [])
+    key_concepts: List[str] = analysis.get("key_concepts", [])
+    infographic_elements: List[str] = analysis.get("infographic_elements", [])
+    layout_suggestion = analysis.get("layout_suggestion", "balanced professional layout")
+    color_palette = analysis.get("color_palette", "professional navy, white, and accent colors")
+    style = analysis.get("recommended_style", "professional editorial infographic")
 
-    composition = (
-        "Center the device in the frame; show close-up detail and a secondary view demonstrating deformation or movement. "
-    )
-
+    # Build optimized prompt with infographic design guidance
     prompt_parts = [
-        "Create a professional scientific/technology visualization for LinkedIn.",
-        f"SUBJECT: {subject}.",
-        f"ACTION: {action}.",
-        f"ENVIRONMENT: {environment}.",
-        f"COMPOSITION: {composition}",
-        f"STYLE: {style}. Clean, modern, premium, scientific aesthetic—realistic or high-quality 3D render.",
-        "LIGHTING: soft, even, studio-style lighting emphasizing material detail.",
-        "QUALITY: high resolution, photorealistic detail, minimal clutter.",
-        f"AUDIENCE: professional LinkedIn / technology / research audience.",
-        "VISUAL RULES: " + (
-            "No fictional characters, no movie references, no cartoons, no logos, no watermarks, minimal text."
-        ),
+        "Create a PREMIUM PROFESSIONAL LINKEDIN INFOGRAPHIC.",
+        f"Style: {style}. Premium corporate appearance with strong visual hierarchy.",
+        "",
     ]
 
+    # Add main heading section with emphasis
+    if heading:
+        prompt_parts.append(f'MAIN HEADING (TEXT): "{heading}"')
+        prompt_parts.append("Display prominently at top in large, bold, professional typography.")
+        prompt_parts.append("")
+
+    # Add main subject/topic section
+    prompt_parts.append("PRIMARY TOPIC:")
+    prompt_parts.append(f"Subject: {subject} | Action: {action} | Context: {environment}")
     if visual_concept:
-        prompt_parts.insert(3, f"VISUAL_CONCEPT: {visual_concept}")
+        prompt_parts.append(f"Visual Narrative: {visual_concept}")
+    prompt_parts.append("")
 
+    # Add visual flow/process section if available
+    if visual_flow:
+        prompt_parts.append("VISUAL FLOW/PROCESS:")
+        flow_str = " → ".join(visual_flow[:4])  # Limit to 4 steps for brevity
+        prompt_parts.append(f"Show progression: {flow_str}")
+        prompt_parts.append("")
+
+    # Add key concepts section (condensed)
+    if key_concepts:
+        prompt_parts.append("KEY CONCEPTS (as short labels in image):")
+        prompt_parts.append(", ".join(key_concepts[:3]))  # Limit to 3 concepts
+        prompt_parts.append("")
+
+    # Add infographic elements suggestion (condensed)
+    if infographic_elements:
+        prompt_parts.append("SUGGESTED VISUAL ELEMENTS:")
+        elements_str = ", ".join(infographic_elements[:3])  # Limit to 3 elements
+        prompt_parts.append(f"Use when relevant: {elements_str}")
+        prompt_parts.append("")
+
+    # Add layout guidance (condensed)
+    prompt_parts.append("LAYOUT:")
+    prompt_parts.append(f"Structure: {layout_suggestion}")
+    prompt_parts.append("Hierarchy: Main heading → Central visual → Supporting details")
+    prompt_parts.append("Aspect: Landscape 16:9 with space for external post copy")
+    prompt_parts.append("")
+
+    # Add visual objects (condensed)
     if objects:
-        prompt_parts.append("VISIBLE OBJECTS: " + ", ".join(objects))
+        prompt_parts.append("VISUAL ELEMENTS: " + ", ".join(objects[:3]))
+        prompt_parts.append("")
 
-    prompt_parts.append(rules)
-    prompt_parts.append("Keep image crop landscape 16:9, with negative space for post copy.")
+    # Add color and styling guidance (condensed)
+    prompt_parts.append("STYLE & COLORS:")
+    prompt_parts.append(f"Colors: {color_palette}")
+    prompt_parts.append("Typography: Clean, professional fonts with strong contrast")
+    prompt_parts.append("Aesthetic: Sophisticated, intentional, carefully designed professional composition")
+    prompt_parts.append("")
 
-    return "\n\n".join(prompt_parts)
+    # Add critical rules
+    prompt_parts.append(f"CRITICAL RULES: {rules}")
+    prompt_parts.append("Viewer should understand main topic within 2-3 seconds.")
+    prompt_parts.append("Image must be specific to this content, NOT generic AI art.")
+
+    return "\n".join(prompt_parts)

@@ -1,12 +1,14 @@
 from googleapiclient.discovery import build
 
-from config.settings import YOUTUBE_API_KEY, YOUTUBE_CHANNEL_ID, validate_config
+from config.settings import YOUTUBE_API_KEY, validate_config
 
 
-def get_channel_details(channel_id: str | None = None) -> dict:
+def get_channel_details(channel_id: str) -> dict:
     """Return basic channel metadata from YouTube Data API."""
+    if not channel_id:
+        raise ValueError("channel_id is required")
+    
     config = validate_config()
-    channel_id = channel_id or config["YOUTUBE_CHANNEL_ID"]
 
     try:
         youtube = build("youtube", "v3", developerKey=config["YOUTUBE_API_KEY"])
@@ -31,10 +33,24 @@ def get_channel_details(channel_id: str | None = None) -> dict:
     }
 
 
-def get_latest_video(channel_id: str | None = None) -> dict:
-    """Return the newest public video for the channel."""
+def get_latest_video(channel_id: str) -> dict:
+    """Return the newest public video for the specified channel.
+    
+    Args:
+        channel_id: YouTube channel ID to check for latest video
+    
+    Returns:
+        dict with keys: video_id, title, published_at
+    
+    Raises:
+        ValueError: if channel_id is not provided
+        RuntimeError: if YouTube API call fails
+        ValueError: if no videos found for channel
+    """
+    if not channel_id:
+        raise ValueError("channel_id is required")
+    
     config = validate_config()
-    channel_id = channel_id or config["YOUTUBE_CHANNEL_ID"]
 
     try:
         youtube = build("youtube", "v3", developerKey=config["YOUTUBE_API_KEY"])

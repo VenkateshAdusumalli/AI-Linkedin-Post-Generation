@@ -32,9 +32,41 @@ def is_placeholder(value: str | None) -> bool:
 
 YOUTUBE_API_KEY = get_setting("YOUTUBE_API_KEY")
 GEMINI_API_KEY = get_setting("GEMINI_API_KEY")
-YOUTUBE_CHANNEL_ID = get_setting("YOUTUBE_CHANNEL_ID", "UClXAalunTPaX1YV185DWUeg")
 CLOUDFLARE_ACCOUNT_ID = get_setting("CLOUDFLARE_ACCOUNT_ID")
 CLOUDFLARE_API_TOKEN = get_setting("CLOUDFLARE_API_TOKEN")
+
+
+def get_channels() -> list[dict]:
+    """
+    Load YouTube channels from environment variables in priority order.
+    
+    Expected format:
+        CHANNEL_1_NAME=Channel Name
+        CHANNEL_1_ID=ChannelID
+        CHANNEL_2_NAME=Another Channel
+        CHANNEL_2_ID=AnotherID
+        ...
+    
+    Returns list of channels in priority order.
+    """
+    channels = []
+    channel_num = 1
+    
+    while True:
+        name = get_setting(f"CHANNEL_{channel_num}_NAME")
+        channel_id = get_setting(f"CHANNEL_{channel_num}_ID")
+        
+        if not name or not channel_id:
+            break
+        
+        channels.append({
+            "name": name,
+            "id": channel_id,
+            "priority": channel_num,
+        })
+        channel_num += 1
+    
+    return channels
 
 
 def validate_config() -> dict:
@@ -42,7 +74,6 @@ def validate_config() -> dict:
     config = {
         "YOUTUBE_API_KEY": get_setting("YOUTUBE_API_KEY"),
         "GEMINI_API_KEY": get_setting("GEMINI_API_KEY"),
-        "YOUTUBE_CHANNEL_ID": get_setting("YOUTUBE_CHANNEL_ID", "UClXAalunTPaX1YV185DWUeg"),
         "CLOUDFLARE_ACCOUNT_ID": get_setting("CLOUDFLARE_ACCOUNT_ID"),
         "CLOUDFLARE_API_TOKEN": get_setting("CLOUDFLARE_API_TOKEN"),
     }
@@ -60,6 +91,13 @@ def validate_config() -> dict:
         raise ValueError(
             "Replace placeholder values in .env with your real API keys: "
             + ", ".join(placeholder_names)
+        )
+
+    # Check that at least one channel is configured
+    channels = get_channels()
+    if not channels:
+        raise ValueError(
+            "No YouTube channels configured. Add CHANNEL_1_NAME, CHANNEL_1_ID, etc. to .env"
         )
 
     return config
