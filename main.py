@@ -1,3 +1,4 @@
+from database.database import init_database, is_video_processed, save_processed_video
 from agents.image_agent import generate_linkedin_image
 from agents.linkedin_agent import generate_linkedin_post
 from config.settings import get_channels, validate_config
@@ -67,7 +68,7 @@ def process_video(video: dict) -> None:
 
 def main() -> None:
     try:
-        # Validate configuration and get channels
+        init_database()
         validate_config()
         channels = get_channels()
 
@@ -84,16 +85,37 @@ def main() -> None:
 
             video = check_channel_for_new_video(channel)
 
-            if video:
-                print()
-                process_video(video)
-                video_found = True
-                print()
-                print(f"Priority {channel['priority']} had a new video. Stopping here.")
-                break
-            else:
+            if not video:
                 print("  No new video found.")
                 print()
+                continue
+
+            video_id = video["video_id"]
+            print(f"  Latest video: {video['title']}")
+            print(f"  Video ID: {video_id}")
+
+            if is_video_processed(video_id):
+                print("  Already processed. Skipping.")
+                print()
+                continue
+
+            print("  New video found.")
+            print()
+            process_video(video)
+
+            print()
+            print("Saving video to database...")
+            save_processed_video(
+                channel_id=channel["id"],
+                video_id=video_id,
+                video_title=video["title"],
+                published_at=video.get("published_at"),
+            )
+            print("Processing completed successfully.")
+            video_found = True
+            print()
+            print(f"Priority {channel['priority']} had a new video. Stopping here.")
+            break
 
         if not video_found:
             print("No new videos found on any channel.")
