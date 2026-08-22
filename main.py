@@ -1,7 +1,10 @@
+from pathlib import Path
+
 from database.database import init_database, is_video_processed, save_processed_video
 from agents.image_agent import generate_linkedin_image
 from agents.linkedin_agent import generate_linkedin_post
 from config.settings import get_channels, validate_config
+from linkedin.linkedin_client import publish_linkedin_post
 from youtube.transcript import extract_transcript
 from youtube.youtube_client import get_latest_video
 
@@ -14,13 +17,16 @@ def check_channel_for_new_video(channel: dict) -> dict | None:
         channel: dict with 'name' and 'id' keys
     
     Returns:
-        dict with video info, or None if no video found or error occurs
+        dict with video info, or None if the channel has no videos
+
+    Raises:
+        RuntimeError: if the YouTube API or network request fails
     """
     try:
         video = get_latest_video(channel["id"])
         return video
-    except (ValueError, RuntimeError) as exc:
-        print(f"  Error checking {channel['name']}: {exc}")
+    except ValueError as exc:
+        print(f"  No video found for {channel['name']}: {exc}")
         return None
 
 
@@ -51,6 +57,16 @@ def process_video(video: dict) -> None:
         print("Generating image prompt...")
         image_path = generate_linkedin_image(linkedin_post)
         print("Image generated successfully.")
+
+        print()
+        print("Publishing to LinkedIn...")
+        publish_linkedin_post(linkedin_post, image_path)
+        print("LinkedIn post published successfully.")
+
+        try:
+            Path(image_path).unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"Warning: could not remove temporary image: {exc}")
 
         print()
         print("-" * 30)

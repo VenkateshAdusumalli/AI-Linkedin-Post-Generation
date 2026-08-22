@@ -19,6 +19,9 @@ ai-linkedin-agent/
 │   ├── __init__.py
 │   ├── image_agent.py
 │   └── linkedin_agent.py
+├── linkedin/
+│   ├── __init__.py
+│   └── linkedin_client.py
 ├── config/
 │   ├── __init__.py
 │   └── settings.py
@@ -51,6 +54,8 @@ GEMINI_API_KEY=your_gemini_key
 YOUTUBE_CHANNEL_ID=UClXAalunTPaX1YV185DWUeg
 CLOUDFLARE_ACCOUNT_ID=your_account_id
 CLOUDFLARE_API_TOKEN=your_api_token
+LINKEDIN_ACCESS_TOKEN=your_linkedin_access_token
+LINKEDIN_MEMBER_ID=guc3VSbBDM
 ```
 
 ## Run
@@ -64,4 +69,6 @@ python main.py
 - The transcript stays in memory and is passed directly to Gemini.
 - The LinkedIn post is used to generate a relevant image prompt.
 - Cloudflare Workers AI returns a Base64 image that is saved temporarily.
-- No LinkedIn publishing or permanent image archiving is implemented yet.
+- LinkedIn publishing uses the stored access token and publishes to the configured personal member ID.
+- The temporary image is uploaded to LinkedIn and removed locally after successful publishing.
+- A video is saved as processed only after LinkedIn publishing succeeds.

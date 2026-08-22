@@ -34,6 +34,8 @@ YOUTUBE_API_KEY = get_setting("YOUTUBE_API_KEY")
 GEMINI_API_KEY = get_setting("GEMINI_API_KEY")
 CLOUDFLARE_ACCOUNT_ID = get_setting("CLOUDFLARE_ACCOUNT_ID")
 CLOUDFLARE_API_TOKEN = get_setting("CLOUDFLARE_API_TOKEN")
+LINKEDIN_ACCESS_TOKEN = get_setting("LINKEDIN_ACCESS_TOKEN")
+LINKEDIN_MEMBER_ID = get_setting("LINKEDIN_MEMBER_ID")
 
 
 def get_channels() -> list[dict]:
@@ -76,6 +78,8 @@ def validate_config() -> dict:
         "GEMINI_API_KEY": get_setting("GEMINI_API_KEY"),
         "CLOUDFLARE_ACCOUNT_ID": get_setting("CLOUDFLARE_ACCOUNT_ID"),
         "CLOUDFLARE_API_TOKEN": get_setting("CLOUDFLARE_API_TOKEN"),
+        "LINKEDIN_ACCESS_TOKEN": get_setting("LINKEDIN_ACCESS_TOKEN"),
+        "LINKEDIN_MEMBER_ID": get_setting("LINKEDIN_MEMBER_ID"),
     }
 
     missing = [name for name, value in config.items() if not value]
