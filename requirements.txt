@@ -3,3 +3,6 @@ youtube-transcript-api
 google-genai
 python-dotenv
 requests
+yt-dlp
+opencv-python
+Pillow

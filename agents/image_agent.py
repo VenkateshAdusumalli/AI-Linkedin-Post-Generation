@@ -14,10 +14,35 @@ CLOUDFLARE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
 CLOUDFLARE_PROMPT_MAX_LENGTH = 2048
 
 
-def _call_gemini_analyze(api_key: str, linkedin_post: str) -> str:
+def _format_video_understanding(understanding: Dict[str, Any] | None) -> str:
+    """Render video understanding as image-concept context."""
+    if not understanding:
+        return ""
+    def get(key: str, default: str = "") -> str:
+        value = understanding.get(key, default)
+        if isinstance(value, list):
+            return "; ".join(str(v) for v in value[:4])
+        return str(value) if value else default
+
+    return f"""
+VIDEO THEME (ground the visual in this, not just post wording):
+- Main theme: {get("main_theme") or get("main_topic")}
+- Central idea: {get("central_idea")}
+- Product/company and role: {get("product_or_company")} — {get("product_role")}
+- What the video demonstrates: {get("what_video_demonstrates")}
+- Visual info from frames: {get("visual_information")}
+"""
+
+
+def _call_gemini_analyze(
+    api_key: str,
+    linkedin_post: str,
+    understanding: Dict[str, Any] | None = None,
+) -> str:
     client = genai.Client(api_key=api_key)
+    theme_section = _format_video_understanding(understanding)
     prompt = f"""
-Understand the following LinkedIn post before designing its image. Return a JSON object ONLY (no extra text) with these keys:
+Understand the following LinkedIn post before designing its image. Return a JSON object ONLY (no extra text) with these keys:{theme_section}
 
 - main_subject: short phrase naming the primary real-world subject
 - real_subject: the literal subject when metaphors, hype, or pop-culture comparisons appear; never name the reference
@@ -133,7 +158,28 @@ def _save_temporary_image(image_bytes: bytes, mime_type: str) -> str:
     return str(temp_path)
 
 
-def generate_linkedin_image(linkedin_post: str) -> str:
+def _validate_image_dimensions(image_bytes: bytes) -> None:
+    """Log a warning if the image is far from LinkedIn landscape (~1.91:1). Never fails."""
+    try:
+        from PIL import Image
+        import io
+
+        with Image.open(io.BytesIO(image_bytes)) as img:
+            width, height = img.size
+            if not height:
+                return
+            aspect = width / height
+            print(f"  Image size: {width}x{height} (aspect {aspect:.2f}, target ~1.91 landscape).")
+            if aspect < 1.2:
+                print("  Warning: image looks square/portrait; LinkedIn prefers landscape ~1.91:1.")
+    except Exception as exc:
+        print(f"  Warning: image dimension check skipped: {type(exc).__name__}: {exc}")
+
+
+def generate_linkedin_image(
+    linkedin_post: str,
+    understanding: Dict[str, Any] | None = None,
+) -> str:
     """Generate a temporary image for a LinkedIn post using Cloudflare Workers AI."""
     config = validate_config()
     account_id = config["CLOUDFLARE_ACCOUNT_ID"]
@@ -142,14 +188,15 @@ def generate_linkedin_image(linkedin_post: str) -> str:
     if not linkedin_post:
         raise ValueError("LinkedIn post content is required to generate an image prompt.")
 
-    # Analyze the post with Gemini to produce a safe, accurate visual concept
+    # Analyze the post (+ video theme when available) to produce a visual concept
     gemini_key = config.get("GEMINI_API_KEY")
     analysis: Dict[str, Any] = {}
     if gemini_key:
         try:
-            analysis_text = _call_gemini_analyze(gemini_key, linkedin_post)
+            analysis_text = _call_gemini_analyze(gemini_key, linkedin_post, understanding)
             analysis = json.loads(analysis_text)
-        except Exception:
+        except Exception as exc:
+            print(f"  Warning: image concept analysis failed, using fallback: {exc}")
             analysis = {}
 
     prompt = build_image_prompt(linkedin_post, analysis)
@@ -192,6 +239,8 @@ def generate_linkedin_image(linkedin_post: str) -> str:
     except Exception as exc:
         raise RuntimeError(f"Image decoding failed: {exc}") from exc
 
+    _validate_image_dimensions(image_bytes)
+
     return _save_temporary_image(image_bytes, mime_type)
 
 
@@ -205,37 +254,8 @@ def identify_real_subject(analysis: Dict[str, Any], linkedin_post: str) -> str:
 
 
 def build_image_prompt(linkedin_post: str, analysis: Dict[str, Any] | None = None) -> str:
-    """Build a focused, topic-specific prompt for Cloudflare FLUX."""
-    rules = (
-        "Avoid cartoon or fictional/movie/superhero characters, pop-culture references, misleading metaphors, "
-        "random objects, generic AI artwork, gaming or fantasy aesthetics, meme styling, clutter, excessive effects, "
-        "paragraphs, long explanations, tiny or malformed text, logos, brand names, watermarks, and distorted faces."
-    )
-
-    if not analysis:
-        return (
-            "Create a premium professional LinkedIn visual based on the core message of the post. "
-            "First identify the literal real-world subject and show it clearly in a suitable editorial, "
-            "scientific, product, scene, or workflow composition. Use strong hierarchy, generous white space, "
-            "restrained colors, professional typography, balanced composition, and high-quality lighting. "
-            "Use one short heading plus at most 4 short labels when text genuinely helps; never use paragraphs. "
-            f"{rules}\n\nLinkedIn post:\n{linkedin_post[:900]}"
-        )[:CLOUDFLARE_PROMPT_MAX_LENGTH]
-
-    subject = identify_real_subject(analysis, linkedin_post)
-    core_message = analysis.get("core_message", analysis.get("visual_concept", "show the central idea clearly"))
-    takeaway = analysis.get("main_takeaway", "")
-    action = analysis.get("main_action", "")
-    environment = analysis.get("environment", "")
-    visual_story = analysis.get("visual_story", analysis.get("visual_concept", ""))
-    heading = analysis.get("image_heading", "")
-    visual_flow: List[str] = analysis.get("visual_flow", []) or []
-    key_concepts: List[str] = analysis.get("key_concepts", []) or []
-    objects: List[str] = analysis.get("important_objects", []) or []
-    infographic_elements: List[str] = analysis.get("infographic_elements", []) or []
-    layout_suggestion = analysis.get("layout_suggestion", "balanced composition")
-    color_palette = analysis.get("color_palette", "restrained professional colors")
-    style = analysis.get("visual_style", analysis.get("recommended_style", "professional editorial visual"))
+    """Build a concise, topic-specific prompt for Cloudflare FLUX (aim ~400-600 chars)."""
+    negative = "No cartoons, pop-culture, metaphors, clutter, paragraphs, tiny text, logos, watermarks, or distorted faces."
 
     def short_text(value: Any, limit: int, default: str = "") -> str:
         if not isinstance(value, str):
@@ -245,73 +265,54 @@ def build_image_prompt(linkedin_post: str, analysis: Dict[str, Any] | None = Non
     def short_items(values: Any, limit: int) -> List[str]:
         if not isinstance(values, list):
             return []
-        return [short_text(value, 60) for value in values[:limit] if short_text(value, 60)]
+        return [short_text(value, 24) for value in values[:limit] if short_text(value, 24)]
 
-    visual_flow = short_items(visual_flow, 5)
-    labels = short_items(key_concepts, 4)
-    objects = short_items(objects, 4)
-    infographic_elements = short_items(infographic_elements, 4)
-    subject = short_text(subject, 160, "the real-world subject")
-    core_message = short_text(core_message, 260, "the central idea")
-    takeaway = short_text(takeaway, 160)
-    action = short_text(action, 120)
-    environment = short_text(environment, 100)
-    visual_story = short_text(visual_story, 320)
-    heading = short_text(heading, 100)
-    layout_suggestion = short_text(layout_suggestion, 140, "balanced composition")
-    color_palette = short_text(color_palette, 120, "restrained professional colors")
-    style = short_text(style, 120, "professional editorial visual")
+    if not analysis:
+        return (
+            "Premium professional LinkedIn visual, landscape 16:9, showing the post's literal real-world subject. "
+            "Clean hierarchy, white space, restrained colors. One short heading max, no paragraphs. "
+            f"{negative} Post: {short_text(linkedin_post, 200)}"
+        )[:CLOUDFLARE_PROMPT_MAX_LENGTH]
 
-    prompt_parts = [
-        "Create a PREMIUM PROFESSIONAL LINKEDIN VISUAL.",
-        f"Selected visual style: {style}. Do not force an infographic if this style is a scene, product, scientific, or editorial visual.",
-        "The image must communicate the post's core message within a few seconds.",
-        "",
-    ]
+    subject = short_text(
+        identify_real_subject(analysis, linkedin_post), 100, "the real-world subject"
+    )
+    core_message = short_text(
+        analysis.get("core_message", analysis.get("visual_concept", "show the central idea")),
+        140,
+        "the central idea",
+    )
+    story = short_text(analysis.get("visual_story", analysis.get("visual_concept", "")), 140)
+    environment = short_text(analysis.get("environment", ""), 60)
+    action = short_text(analysis.get("main_action", ""), 60)
+    heading = short_text(analysis.get("image_heading", ""), 60)
+    style = short_text(
+        analysis.get("visual_style", analysis.get("recommended_style", "professional editorial visual")),
+        60,
+        "professional editorial visual",
+    )
+    labels = short_items(analysis.get("key_concepts", []), 4)
+    objects = short_items(analysis.get("important_objects", []), 4)
+    flow = short_items(analysis.get("visual_flow", []), 4)
 
-    if heading:
-        prompt_parts.append(f'MAIN HEADING (TEXT, maximum 3 short lines): "{heading}"')
-        prompt_parts.append("Render it large, crisp, and readable with professional typography; do not add any other heading.")
-        prompt_parts.append("")
-
-    prompt_parts.extend([
-        "REAL SUBJECT AND MESSAGE:",
-        f"Literal subject: {subject}",
-        f"Core message: {core_message}",
-        f"Main takeaway: {takeaway}",
-        f"Real action/process: {action}; context: {environment}",
-        f"Visual story: {visual_story}",
-        "Ignore metaphors, hype, and pop-culture references; depict the literal subject and message.",
-        "",
-    ])
-
-    if visual_flow:
-        prompt_parts.append("PROCESS STAGES (use only if visually relevant): " + " -> ".join(visual_flow))
-    prompt_parts.append("")
-
-    if labels:
-        prompt_parts.append("SUPPORTING TEXT LABELS (use only these, maximum 4; keep each very short): " + ", ".join(labels))
-        prompt_parts.append("")
-
-    if infographic_elements:
-        prompt_parts.append("RELEVANT VISUAL ELEMENTS (use only when they support the story): " + ", ".join(infographic_elements))
-        prompt_parts.append("")
-
-    prompt_parts.extend([
-        "COMPOSITION AND FINISH:",
-        f"Composition: {layout_suggestion}",
-        f"Palette: {color_palette}",
-        "Use clear hierarchy, generous white space, strong contrast, sophisticated lighting, and polished professional typography.",
-        "Landscape 16:9 LinkedIn composition; keep the main subject prominent and every element intentional.",
-    ])
+    parts = [f"Premium LinkedIn visual, {style}, landscape 16:9. Subject: {subject}. Message: {core_message}."]
+    if environment or action:
+        parts.append(f"Scene: {action} in {environment}.".strip())
+    if story:
+        parts.append(f"{story}")
     if objects:
-        prompt_parts.append("Relevant physical elements only: " + ", ".join(objects))
-    prompt_parts.append("")
+        parts.append(f"Show: {', '.join(objects)}.")
+    if flow:
+        parts.append(f"Stages: {' -> '.join(flow)}.")
+    if heading:
+        parts.append(f'Heading text: "{heading}".')
+    elif labels:
+        parts.append(f"Labels: {', '.join(labels)}.")
+    elif objects:
+        pass
+    else:
+        parts.append("No text unless it helps.")
+    parts.append("Clean hierarchy, white space, restrained professional colors.")
+    parts.append(negative)
 
-    prompt_parts.extend([
-        "TEXT LIMIT: one short heading plus at most 4 short labels. No paragraphs, explanations, full-post text, or tiny text.",
-        f"NEGATIVE INSTRUCTIONS: {rules}",
-        "Final quality check: accurately represent the real subject and core message, use the selected style, avoid clutter, and make the topic understandable at a glance.",
-    ])
-
-    return "\n".join(prompt_parts)[:CLOUDFLARE_PROMPT_MAX_LENGTH]
+    return " ".join(parts)[:CLOUDFLARE_PROMPT_MAX_LENGTH]

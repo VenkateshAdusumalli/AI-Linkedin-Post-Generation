@@ -38,6 +38,10 @@ def init_database() -> None:
             )
             """
         )
+        # Lightweight migration: store understanding JSON for debugging/retry
+        columns = [row["name"] for row in connection.execute("PRAGMA table_info(videos)")]
+        if "understanding_json" not in columns:
+            connection.execute("ALTER TABLE videos ADD COLUMN understanding_json TEXT")
 
 
 def is_video_processed(video_id: str) -> bool:
@@ -55,19 +59,44 @@ def save_processed_video(
     video_id: str,
     video_title: str,
     published_at: str | None,
+    understanding: dict | None = None,
 ) -> None:
     """Record a successfully processed video without creating duplicates."""
     processed_at = datetime.now().isoformat(timespec="seconds")
+    understanding_json = None
+    if understanding:
+        try:
+            import json
+
+            understanding_json = json.dumps(understanding, ensure_ascii=False)[:8000]
+        except Exception:
+            understanding_json = None
     with _connect() as connection:
-        connection.execute(
-            """
-            INSERT OR IGNORE INTO videos (
-                channel_id,
-                video_id,
-                video_title,
-                published_at,
-                processed_at
-            ) VALUES (?, ?, ?, ?, ?)
-            """,
-            (channel_id, video_id, video_title, published_at, processed_at),
-        )
+        columns = [row["name"] for row in connection.execute("PRAGMA table_info(videos)")]
+        if "understanding_json" in columns:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO videos (
+                    channel_id,
+                    video_id,
+                    video_title,
+                    published_at,
+                    processed_at,
+                    understanding_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (channel_id, video_id, video_title, published_at, processed_at, understanding_json),
+            )
+        else:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO videos (
+                    channel_id,
+                    video_id,
+                    video_title,
+                    published_at,
+                    processed_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (channel_id, video_id, video_title, published_at, processed_at),
+            )

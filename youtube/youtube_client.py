@@ -33,6 +33,54 @@ def get_channel_details(channel_id: str) -> dict:
     }
 
 
+def get_candidate_videos(channel_id: str, max_results: int = 5) -> list[dict]:
+    """Return multiple recent videos for the specified channel (newest first).
+    
+    Args:
+        channel_id: YouTube channel ID to check for videos
+        max_results: Maximum number of videos to return (default 5)
+    
+    Returns:
+        list of dicts with keys: video_id, title, published_at, description
+    
+    Raises:
+        ValueError: if channel_id is not provided
+        RuntimeError: if YouTube API call fails
+        ValueError: if no videos found for channel
+    """
+    if not channel_id:
+        raise ValueError("channel_id is required")
+    
+    config = validate_config()
+
+    try:
+        youtube = build("youtube", "v3", developerKey=config["YOUTUBE_API_KEY"])
+        response = youtube.search().list(
+            part="snippet",
+            channelId=channel_id,
+            type="video",
+            order="date",
+            maxResults=max_results,
+        ).execute()
+    except Exception as exc:
+        raise RuntimeError(f"YouTube API failure: {exc}") from exc
+
+    items = response.get("items", [])
+    if not items:
+        raise ValueError(f"No videos found for channel: {channel_id}")
+
+    videos = []
+    for video in items:
+        videos.append({
+            "video_id": video["id"]["videoId"],
+            "title": video["snippet"]["title"],
+            "description": video["snippet"].get("description", ""),
+            "published_at": video["snippet"].get("publishedAt"),
+        })
+    
+    return videos
+
+
 def get_latest_video(channel_id: str) -> dict:
     """Return the newest public video for the specified channel.
     
