@@ -112,12 +112,15 @@ def _initialize_image_upload(access_token: str, owner_urn: str) -> tuple[str, st
 
 def _upload_image(access_token: str, upload_url: str, image_path: Path) -> None:
     mime_type = mimetypes.guess_type(image_path.name)[0] or "application/octet-stream"
+    # NOTE: upload_url is a pre-signed storage URL (not api.linkedin.com).
+    # It must NOT receive LinkedIn auth/version headers or the signature breaks.
+    # Send only Content-Type.
     try:
         with image_path.open("rb") as image_file:
             response = requests.put(
                 upload_url,
                 data=image_file,
-                headers=_headers(access_token, mime_type),
+                headers={"Content-Type": mime_type},
                 timeout=60,
             )
     except OSError as exc:
@@ -134,7 +137,7 @@ def _upload_image(access_token: str, upload_url: str, image_path: Path) -> None:
     _raise_linkedin_error(response, "image upload", upload_url)
 
 
-def _create_image_post(access_token: str, author_urn: str, text: str, image_urn: str) -> None:
+def _create_image_post(access_token: str, author_urn: str, text: str, image_urn: str) -> str | None:
     payload = {
         "author": author_urn,
         "commentary": text,
@@ -160,9 +163,29 @@ def _create_image_post(access_token: str, author_urn: str, text: str, image_urn:
 
     _raise_linkedin_error(response, "post creation", request_url)
 
+    # LinkedIn returns the new post URN in the x-restli-id header (and sometimes body).
+    # Log it so a "success" print can be verified against linkedin.com/feed.
+    post_urn = response.headers.get("x-restli-id") or response.headers.get("X-Restli-Id")
+    if not post_urn:
+        try:
+            body_json = response.json()
+            if isinstance(body_json, dict):
+                post_urn = body_json.get("id") or body_json.get("urn")
+        except Exception:
+            pass
+    print(f"Post creation HTTP status: {response.status_code}")
+    print(f"Post URN (x-restli-id): {post_urn or '<missing - response had no ID header/body>'}")
+    body_preview = _response_body(response)
+    if body_preview and body_preview != "<empty response body>":
+        print(f"Post creation response body: {body_preview[:2000]}")
+    return post_urn
 
-def publish_linkedin_post(text: str, image_path: str) -> None:
-    """Upload the generated image and publish it with the generated text."""
+
+def publish_linkedin_post(text: str, image_path: str) -> str | None:
+    """Upload the generated image and publish it with the generated text.
+
+    Returns the LinkedIn post URN when the API provides one, else None.
+    """
     if not text or not text.strip():
         raise ValueError("LinkedIn post text is required.")
 
@@ -175,10 +198,18 @@ def publish_linkedin_post(text: str, image_path: str) -> None:
     member_id = config["LINKEDIN_MEMBER_ID"]
     author_urn = f"urn:li:person:{member_id}"
 
+    print(f"Publishing as: {author_urn}")
+    print(f"Post text length: {len(text.strip())} chars")
     print("Uploading image to LinkedIn...")
     upload_url, image_urn = _initialize_image_upload(access_token, author_urn)
+    print(f"Image URN: {image_urn}")
     _upload_image(access_token, upload_url, path)
     print("Image upload successful.")
     print("Creating LinkedIn post...")
-    _create_image_post(access_token, author_urn, text.strip(), image_urn)
+    post_urn = _create_image_post(access_token, author_urn, text.strip(), image_urn)
     print("Post creation successful.")
+    if post_urn:
+        print(f"Verify at: https://www.linkedin.com/feed/ (post {post_urn})")
+    else:
+        print("WARNING: LinkedIn returned success but no post ID - verify manually at https://www.linkedin.com/in/me/recent-activity/")
+    return post_urn

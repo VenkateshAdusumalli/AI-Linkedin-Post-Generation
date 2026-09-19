@@ -8,7 +8,7 @@ from agents.frame_extractor import get_visual_analysis
 from config.settings import get_channels, validate_config
 from linkedin.linkedin_client import publish_linkedin_post
 from youtube.transcript import extract_transcript
-from youtube.youtube_client import get_candidate_videos, get_latest_video
+from youtube.youtube_client import get_candidate_videos
 
 
 MAX_CANDIDATE_VIDEOS = 5
@@ -50,6 +50,8 @@ def get_candidate_videos_for_channel(channel: dict, max_candidates: int = MAX_CA
         all_videos = get_candidate_videos(channel["id"], max_results=max_candidates + 5)
     except ValueError as exc:
         raise ValueError(f"No videos found for {channel['name']}: {exc}") from exc
+    except RuntimeError as exc:
+        raise RuntimeError(f"YouTube lookup failed for {channel['name']}: {exc}") from exc
     
     # Filter out already-processed videos
     unprocessed = [v for v in all_videos if not is_video_processed(v["video_id"])]
@@ -146,8 +148,11 @@ def find_suitable_video_in_channel(channel: dict, max_candidates: int = MAX_CAND
     """
     try:
         candidates = get_candidate_videos_for_channel(channel, max_candidates)
-    except ValueError as exc:
+    except (ValueError, RuntimeError) as exc:
         print(f"  {exc}")
+        return None
+    except Exception as exc:
+        print(f"  Unexpected error checking channel {channel.get('name')}: {exc}")
         return None
     
     if not candidates:
@@ -163,13 +168,13 @@ def find_suitable_video_in_channel(channel: dict, max_candidates: int = MAX_CAND
         
         if evaluation["quality"] == "GOOD":
             print()
-            print(f"  ✓ Selected video: {candidate['title']}")
+            print(f"  [OK] Selected video: {candidate['title']}")
             return {
                 "video": candidate,
                 "evaluation": evaluation,
             }
         else:
-            print(f"  ✗ Skipping due to poor content quality.")
+            print(f"  [SKIP] Skipping due to poor content quality.")
             print()
     
     return None
@@ -221,8 +226,8 @@ def process_video(video: dict, evaluation: dict) -> None:
 
     print()
     print("Publishing to LinkedIn...")
-    publish_linkedin_post(linkedin_post, image_path)
-    print("LinkedIn post published successfully.")
+    post_urn = publish_linkedin_post(linkedin_post, image_path)
+    print(f"LinkedIn post published successfully. Post URN: {post_urn}")
 
     try:
         Path(image_path).unlink(missing_ok=True)
@@ -300,7 +305,7 @@ def main() -> None:
                     published_at=video.get("published_at"),
                     understanding=evaluation.get("analysis"),
                 )
-                print("✓ Video successfully processed and saved.")
+                print("[OK] Video successfully processed and saved.")
                 print()
                 video_processed = True
                 print(f"Priority {channel['priority']} had a suitable video. Stopping here.")
@@ -308,7 +313,7 @@ def main() -> None:
 
             except Exception as exc:
                 print()
-                print(f"✗ Error during processing: {exc}")
+                print(f"[FAIL] Error during processing: {exc}")
                 print(f"Video NOT marked as processed. Will retry on next run.")
                 print()
                 # Continue to next channel if processing fails

@@ -52,12 +52,12 @@ Understand the following LinkedIn post before designing its image. Return a JSON
 - main_action: short phrase describing the real action or process
 - important_objects: array of no more than 4 relevant visible objects
 - environment: short phrase for the real context, such as lab, clinic, office, factory, or data center
-- visual_story: concise description of the clearest visual narrative for the core message
+- visual_story: concise description of the clearest text-free visual narrative for the core message, told only through objects, actions, composition, environment, and visual metaphor
 - visual_style: one best-fit style from: professional infographic, business editorial visual, scientific visualization, medical/healthcare visualization, technology visualization, product visualization, realistic professional scene, process/workflow diagram, hybrid infographic + realistic scene
-- image_heading: short heading, maximum 3 short lines and 6 words total; use an empty string when text would not help
-- visual_flow: array of 3-5 short stages only when a process is central; otherwise an empty array
-- key_concepts: array of no more than 4 short labels, each 1-3 words; use only labels that materially support the visual
-- infographic_elements: array of no more than 4 relevant visual elements; do not force infographic elements into scenes
+- image_heading: always an empty string; images must contain no text of any kind
+- visual_flow: array of 3-5 short visual stages only when a process is central, described as pure imagery with no text; otherwise an empty array
+- key_concepts: array of no more than 4 short visual concepts, each 1-3 words, for internal visual guidance only; never rendered as text in the image
+- infographic_elements: array of no more than 4 relevant text-free visual elements; do not force infographic elements into scenes; never use text labels, numbers, or captions
 - layout_suggestion: concise composition suited to the selected visual style
 - color_palette: restrained professional palette suited to the subject
 - contains: an object with boolean flags for movie_references, fictional_characters, metaphors, sensational_headlines, comparisons, jokes
@@ -66,8 +66,8 @@ Rules:
 - Identify the real subject and core message, not random nouns from the post.
 - Translate metaphors and sensational language into the literal real-world subject. For example, "AI is taking over" means automation/workflow, not attacking robots.
 - Choose the visual_style dynamically from the list; do not default to an infographic.
-- Use one heading and at most 4 short supporting labels. Never request paragraphs, explanations, the full post, logos, brands, or watermarks as image text.
-- Every visual element must support the core message. Prefer no text beyond the heading when labels are unnecessary.
+- Strictly no text in the image: no headings, labels, captions, words, letters, numbers, paragraphs, logos, brands, or watermarks. Communicate the main theme entirely through visual storytelling, objects, actions, composition, environment, and visual metaphor.
+- Every visual element must support the core message through pure imagery.
 - Do not include image-model-specific syntax. Keep arrays as arrays of strings.
 - Return only valid JSON, with no markdown formatting or extra text.
 
@@ -211,12 +211,28 @@ def generate_linkedin_image(
         response = requests.post(endpoint, json=payload, headers=headers, timeout=60)
         response.raise_for_status()
     except Exception as exc:
-        details = response.text.strip() if "response" in locals() else ""
+        details = ""
+        if "response" in locals():
+            try:
+                details = response.text.strip()[:500]
+            except Exception:
+                details = ""
         if details:
             raise RuntimeError(
                 f"Cloudflare image generation failed: {exc}. Response: {details}"
             ) from exc
         raise RuntimeError(f"Cloudflare image generation failed: {exc}") from exc
+
+    # FLUX via /ai/run may return raw image bytes (Content-Type: image/*)
+    # or a JSON envelope with base64 data. Handle both.
+    content_type = (response.headers.get("Content-Type") or "").lower()
+    if content_type.startswith("image/"):
+        image_bytes = response.content
+        if not image_bytes:
+            raise RuntimeError("Cloudflare returned empty image bytes.")
+        mime_type = content_type.split(";")[0].strip() or "image/png"
+        _validate_image_dimensions(image_bytes)
+        return _save_temporary_image(image_bytes, mime_type)
 
     try:
         response_json = response.json()
@@ -254,8 +270,8 @@ def identify_real_subject(analysis: Dict[str, Any], linkedin_post: str) -> str:
 
 
 def build_image_prompt(linkedin_post: str, analysis: Dict[str, Any] | None = None) -> str:
-    """Build a concise, topic-specific prompt for Cloudflare FLUX (aim ~400-600 chars)."""
-    negative = "No cartoons, pop-culture, metaphors, clutter, paragraphs, tiny text, logos, watermarks, or distorted faces."
+    """Build a concise, topic-specific text-free prompt for Cloudflare FLUX (aim ~400-600 chars)."""
+    negative = "Strictly no text, no words, no letters, no numbers, no labels, no captions, no headings. No cartoons, pop-culture, clutter, logos, watermarks, or distorted faces. Pure visual storytelling only."
 
     def short_text(value: Any, limit: int, default: str = "") -> str:
         if not isinstance(value, str):
@@ -269,9 +285,10 @@ def build_image_prompt(linkedin_post: str, analysis: Dict[str, Any] | None = Non
 
     if not analysis:
         return (
-            "Premium professional LinkedIn visual, landscape 16:9, showing the post's literal real-world subject. "
-            "Clean hierarchy, white space, restrained colors. One short heading max, no paragraphs. "
-            f"{negative} Post: {short_text(linkedin_post, 200)}"
+            "Wordless premium professional LinkedIn visual, landscape 16:9, completely text-free. "
+            "Show the post's literal real-world subject entirely through visual storytelling, objects, "
+            "actions, composition, environment, and visual metaphor. Clean hierarchy, white space, restrained colors. "
+            f"{negative} Post theme: {short_text(linkedin_post, 200)}"
         )[:CLOUDFLARE_PROMPT_MAX_LENGTH]
 
     subject = short_text(
@@ -285,33 +302,27 @@ def build_image_prompt(linkedin_post: str, analysis: Dict[str, Any] | None = Non
     story = short_text(analysis.get("visual_story", analysis.get("visual_concept", "")), 140)
     environment = short_text(analysis.get("environment", ""), 60)
     action = short_text(analysis.get("main_action", ""), 60)
-    heading = short_text(analysis.get("image_heading", ""), 60)
     style = short_text(
         analysis.get("visual_style", analysis.get("recommended_style", "professional editorial visual")),
         60,
         "professional editorial visual",
     )
-    labels = short_items(analysis.get("key_concepts", []), 4)
+    concepts = short_items(analysis.get("key_concepts", []), 4)
     objects = short_items(analysis.get("important_objects", []), 4)
     flow = short_items(analysis.get("visual_flow", []), 4)
 
-    parts = [f"Premium LinkedIn visual, {style}, landscape 16:9. Subject: {subject}. Message: {core_message}."]
+    parts = [f"Wordless premium LinkedIn visual, {style}, landscape 16:9, completely text-free. Subject: {subject}. Central theme to convey purely visually: {core_message}."]
     if environment or action:
-        parts.append(f"Scene: {action} in {environment}.".strip())
+        parts.append(f"Environment and action: {action} in {environment}, told through composition and interaction.".strip())
     if story:
-        parts.append(f"{story}")
+        parts.append(f"Visual narrative: {story}")
     if objects:
-        parts.append(f"Show: {', '.join(objects)}.")
+        parts.append(f"Key visual elements: {', '.join(objects)}.")
     if flow:
-        parts.append(f"Stages: {' -> '.join(flow)}.")
-    if heading:
-        parts.append(f'Heading text: "{heading}".')
-    elif labels:
-        parts.append(f"Labels: {', '.join(labels)}.")
-    elif objects:
-        pass
-    else:
-        parts.append("No text unless it helps.")
+        parts.append(f"Visual progression shown as sequential wordless imagery: {', '.join(flow)}.")
+    if concepts:
+        parts.append(f"Reinforce theme with visual metaphors for: {', '.join(concepts)}.")
+    parts.append("Communicate the main theme entirely through visual storytelling, objects, actions, composition, environment, and visual metaphor.")
     parts.append("Clean hierarchy, white space, restrained professional colors.")
     parts.append(negative)
 

@@ -3,11 +3,39 @@
 import tempfile
 from pathlib import Path
 
-import cv2
 from google import genai
 from google.genai import types
 
 from config.settings import validate_config
+
+
+VIDEO_EXTENSIONS = (".mp4", ".webm", ".mkv")
+
+
+def _candidate_video_paths(video_id: str) -> list[Path]:
+    temp_dir = Path(tempfile.gettempdir())
+    return [temp_dir / f"video_{video_id}{ext}" for ext in VIDEO_EXTENSIONS]
+
+
+def _cleanup_downloaded_files(video_id: str) -> None:
+    try:
+        temp_dir = Path(tempfile.gettempdir())
+        for path in _candidate_video_paths(video_id):
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError:
+                pass
+        # yt-dlp may leave extensionless/part files behind
+        for suffix in ("", ".part", ".ytdl"):
+            leftover = temp_dir / f"video_{video_id}{suffix}"
+            try:
+                if leftover.is_file():
+                    leftover.unlink()
+            except OSError:
+                pass
+    except Exception:
+        pass
 
 
 def _download_video(video_id: str) -> str:
@@ -30,9 +58,10 @@ def _download_video(video_id: str) -> str:
     
     temp_dir = tempfile.gettempdir()
     output_path = Path(temp_dir) / f"video_{video_id}.mp4"
-    
-    if output_path.exists():
-        return str(output_path)
+
+    for existing in _candidate_video_paths(video_id):
+        if existing.exists():
+            return str(existing)
     
     url = f"https://www.youtube.com/watch?v={video_id}"
     
@@ -50,7 +79,7 @@ def _download_video(video_id: str) -> str:
         raise RuntimeError(f"Failed to download video {video_id}: {exc}") from exc
     
     # Find the downloaded file (yt-dlp adds extension)
-    for ext in [".mp4", ".webm", ".mkv"]:
+    for ext in VIDEO_EXTENSIONS:
         candidate = Path(temp_dir) / f"video_{video_id}{ext}"
         if candidate.exists():
             return str(candidate)
@@ -72,6 +101,12 @@ def extract_representative_frames(video_id: str, max_frames: int = 6) -> list[tu
     Raises:
         RuntimeError: if frame extraction fails
     """
+    try:
+        import cv2
+    except ImportError:
+        raise RuntimeError("opencv-python not installed. Install with: pip install opencv-python")
+
+    cap = None
     try:
         video_path = _download_video(video_id)
         cap = cv2.VideoCapture(video_path)
@@ -105,23 +140,23 @@ def extract_representative_frames(video_id: str, max_frames: int = 6) -> list[tu
                 timestamp = frame_num / fps if fps > 0 else 0
                 frames.append((timestamp, frame_b64))
         
-        cap.release()
-        
         return frames
     
-    except cv2.error as exc:
-        raise RuntimeError(f"OpenCV error during frame extraction: {exc}") from exc
+    except RuntimeError:
+        raise
     except Exception as exc:
+        # cv2.error subclass check without hard dependency at import time
+        if type(exc).__name__ == "error" and "cv2" in type(exc).__module__:
+            raise RuntimeError(f"OpenCV error during frame extraction: {exc}") from exc
         raise RuntimeError(f"Frame extraction failed: {exc}") from exc
     finally:
-        # Clean up temporary video file
         try:
-            temp_dir = Path(tempfile.gettempdir())
-            video_file = temp_dir / f"video_{video_id}.mp4"
-            if video_file.exists():
-                video_file.unlink()
+            if cap is not None:
+                cap.release()
         except Exception:
             pass
+        # Clean up temporary video file(s)
+        _cleanup_downloaded_files(video_id)
 
 
 def analyze_frames_with_gemini(frames: list[tuple[float, bytes]]) -> str:
